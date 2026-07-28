@@ -1,17 +1,37 @@
-# CampusLost - Frontend
+# CampusLost - Proyecto P3
 
-Frontend con Vite + React + Tailwind, conectado al backend de Spring Boot cuando está disponible. Si el backend no responde, algunas vistas siguen mostrando datos mock locales para no romper la interfaz.
+Repositorio del proyecto integrador de la materia. El backend usa Spring Boot reactivo con WebFlux y el frontend usa Vite + React + Tailwind.
 
-Instalación y ejecución:
+## Ejecución local
+
+Backend:
 
 ```bash
-cd GrupoD_Proyecto/frontend
+cd ProyectoP3_GrupoD/backend
+.\gradlew test
+.\gradlew bootRun
+```
+
+Frontend:
+
+```bash
+cd ProyectoP3_GrupoD/frontend
 npm install
 npm run dev
 ```
 
-Notas:
-- El backend base debe estar corriendo en `http://localhost:8080`.
-- El frontend consume la API en `http://localhost:8080/api` por defecto.
+## Pruebas y CI
+
+El backend incluye pruebas unitarias reactiva/clásicas con Mockito y StepVerifier. El flujo de GitHub Actions corre build y tests para backend y frontend en la rama `main` y el CD publica el backend en Render.
+
+## Despliegue
+
+El frontend sí puede desplegarse en Vercel. Define `VITE_API_URL` apuntando al backend publicado y mantén el archivo `frontend/vercel.json` para soportar rutas SPA.
+
+El backend Spring Boot no es un objetivo natural de Vercel como servicio persistente. Para esa parte es mejor usar Render, Railway, Fly.io o un contenedor en otro proveedor. Si quieres exponerlo a un frontend en Vercel, configura también `APP_CORS_ALLOWED_ORIGINS` con el dominio del frontend.
+
+## Notas
+
+- El backend consume la API bajo `/api`.
 - Para probar login usa los usuarios sembrados por backend, por ejemplo `admin@test.com` / `123` o `user@test.com` / `123`.
-- El objetivo principal sigue siendo el módulo de Reclamos (Claims).
+- El módulo principal sigue siendo Claims, con soporte para objetos perdidos y monitoreo reactivo.

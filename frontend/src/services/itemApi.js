@@ -1,4 +1,4 @@
-import api from './api'
+import api, { API_BASE_URL } from './api'
 
 export async function listItems() {
   const response = await api.get('/items')
@@ -34,5 +34,5 @@ export async function uploadImage(id, file) {
 
 /** URL para mostrar la imagen almacenada en el backend */
 export function getImageUrl(id) {
-  return `http://localhost:8080/api/items/${id}/image`
+  return `${API_BASE_URL}/items/${id}/image`
 }
