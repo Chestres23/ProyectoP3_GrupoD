@@ -5,9 +5,11 @@ import ec.edu.espe.backend.domain.LostItem;
 import ec.edu.espe.backend.domain.User;
 import ec.edu.espe.backend.dto.ClaimRequestDTO;
 import ec.edu.espe.backend.dto.ClaimResponseDTO;
-import ec.edu.espe.backend.exception.DuplicateClaimException;
-import ec.edu.espe.backend.exception.InvalidClaimStateException;
 import ec.edu.espe.backend.exception.ClaimNotFoundException;
+import ec.edu.espe.backend.exception.DuplicateClaimException;
+import ec.edu.espe.backend.exception.ItemNotFoundException;
+import ec.edu.espe.backend.exception.InvalidClaimStateException;
+import ec.edu.espe.backend.exception.UserNotFoundException;
 import ec.edu.espe.backend.repository.ClaimRepository;
 import ec.edu.espe.backend.repository.LostItemRepository;
 import ec.edu.espe.backend.repository.UserRepository;
@@ -15,6 +17,8 @@ import ec.edu.espe.backend.service.impl.ClaimServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.beans.factory.ObjectProvider;
@@ -28,6 +32,10 @@ import java.time.LocalDateTime;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -115,6 +123,49 @@ class ClaimServiceTest {
     }
 
     @Test
+    void shouldCreateClaimAndUseDependenciesInOrder() {
+        when(claimRepository.existsByUserIdAndItemId(1L, 1L)).thenReturn(Mono.just(false));
+        when(userRepository.findById(1L)).thenReturn(Mono.just(mockUser()));
+        when(lostItemRepository.findByIdAndActiveTrue(1L)).thenReturn(Mono.just(mockItem()));
+        when(claimRepository.save(any(Claim.class))).thenAnswer(inv -> {
+            Claim claim = inv.getArgument(0);
+            claim.setId(42L);
+            return Mono.just(claim);
+        });
+
+        ClaimRequestDTO request = new ClaimRequestDTO();
+        request.setUserId(1L);
+        request.setItemId(1L);
+        request.setObservation("  Reclamo válido  ");
+
+        ArgumentCaptor<Claim> captor = ArgumentCaptor.forClass(Claim.class);
+
+        StepVerifier.create(service.createClaim(request))
+                .assertNext(dto -> {
+                    assertThat(dto.getId()).isEqualTo(42L);
+                    assertThat(dto.getObservation()).isEqualTo("Reclamo válido");
+                    assertThat(dto.getStatus()).isEqualTo("PENDING");
+                })
+                .verifyComplete();
+
+        InOrder ordered = inOrder(claimRepository, userRepository, lostItemRepository);
+        ordered.verify(claimRepository).existsByUserIdAndItemId(1L, 1L);
+        ordered.verify(userRepository).findById(1L);
+        ordered.verify(lostItemRepository).findByIdAndActiveTrue(1L);
+        ordered.verify(claimRepository).save(captor.capture());
+
+        Claim savedClaim = captor.getValue();
+        assertThat(savedClaim.getUserId()).isEqualTo(1L);
+        assertThat(savedClaim.getItemId()).isEqualTo(1L);
+        assertThat(savedClaim.getObservation()).isEqualTo("Reclamo válido");
+        assertThat(savedClaim.getStatus()).isEqualTo("PENDING");
+        assertThat(savedClaim.getActive()).isTrue();
+        assertThat(savedClaim.getClaimDate()).isNotNull();
+        assertThat(savedClaim.getCreatedAt()).isNotNull();
+        assertThat(savedClaim.getUpdatedAt()).isNotNull();
+    }
+
+    @Test
     void shouldRejectDuplicateClaim() {
         when(claimRepository.existsByUserIdAndItemId(1L, 1L)).thenReturn(Mono.just(true));
 
@@ -126,6 +177,45 @@ class ClaimServiceTest {
         StepVerifier.create(service.createClaim(request))
                 .expectError(DuplicateClaimException.class)
                 .verify();
+
+        verifyNoInteractions(userRepository, lostItemRepository);
+        verify(claimRepository, never()).save(any());
+        }
+
+        @Test
+        void shouldFailWhenUserDoesNotExist() {
+        when(claimRepository.existsByUserIdAndItemId(1L, 1L)).thenReturn(Mono.just(false));
+        when(userRepository.findById(1L)).thenReturn(Mono.empty());
+
+        ClaimRequestDTO request = new ClaimRequestDTO();
+        request.setUserId(1L);
+        request.setItemId(1L);
+        request.setObservation("Sin usuario");
+
+        StepVerifier.create(service.createClaim(request))
+            .expectError(UserNotFoundException.class)
+            .verify();
+
+        verify(lostItemRepository, never()).findByIdAndActiveTrue(anyLong());
+        verify(claimRepository, never()).save(any());
+        }
+
+        @Test
+        void shouldFailWhenItemDoesNotExist() {
+        when(claimRepository.existsByUserIdAndItemId(1L, 1L)).thenReturn(Mono.just(false));
+        when(userRepository.findById(1L)).thenReturn(Mono.just(mockUser()));
+        when(lostItemRepository.findByIdAndActiveTrue(1L)).thenReturn(Mono.empty());
+
+        ClaimRequestDTO request = new ClaimRequestDTO();
+        request.setUserId(1L);
+        request.setItemId(1L);
+        request.setObservation("Sin objeto");
+
+        StepVerifier.create(service.createClaim(request))
+            .expectError(ItemNotFoundException.class)
+            .verify();
+
+        verify(claimRepository, never()).save(any());
     }
 
     @Test
