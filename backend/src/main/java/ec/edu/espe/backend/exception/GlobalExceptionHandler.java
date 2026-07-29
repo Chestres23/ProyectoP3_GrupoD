@@ -39,7 +39,7 @@ public class GlobalExceptionHandler {
         return buildResponse(HttpStatus.NOT_FOUND, ex.getMessage());
     }
 
-    @ExceptionHandler({DuplicateClaimException.class, InvalidClaimStateException.class, InvalidItemStateException.class})
+    @ExceptionHandler({DuplicateClaimException.class, DuplicateEmailException.class, InvalidClaimStateException.class, InvalidItemStateException.class})
     public ResponseEntity<Map<String, String>> handleBadRequest(RuntimeException ex) {
         return buildResponse(HttpStatus.BAD_REQUEST, ex.getMessage());
     }

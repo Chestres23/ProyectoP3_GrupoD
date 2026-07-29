@@ -45,6 +45,7 @@ public class SecurityConfig {
                         .pathMatchers("/auth/**").permitAll()
                         .pathMatchers("/reactive/**").permitAll()
                         .pathMatchers("/api/reactive/**").permitAll()
+                        .pathMatchers("/items/*/image").permitAll()
                         .pathMatchers("/error").permitAll()
                         .anyExchange().authenticated()
                 )

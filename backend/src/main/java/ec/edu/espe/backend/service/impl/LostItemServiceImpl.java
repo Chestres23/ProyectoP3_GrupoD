@@ -176,7 +176,11 @@ public class LostItemServiceImpl implements LostItemService {
     public Mono<byte[]> getImageBytes(Long id) {
         return itemRepository.findById(id)
                 .switchIfEmpty(Mono.error(new ItemNotFoundException("Objeto no encontrado.")))
-                .map(LostItem::getImageData);
+                .flatMap(item -> {
+                    byte[] data = item.getImageData();
+                    if (data == null) return Mono.empty();
+                    return Mono.just(data);
+                });
     }
 
     @Override

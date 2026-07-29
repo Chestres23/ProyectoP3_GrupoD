@@ -78,15 +78,11 @@ public class LostItemController {
     @GetMapping("/{id}/image")
     public Mono<ResponseEntity<byte[]>> getImage(@PathVariable Long id) {
         return service.getImageBytes(id)
-                .flatMap(data -> {
-                    if (data == null || data.length == 0) {
-                        return Mono.just(ResponseEntity.notFound().build());
-                    }
-                    return service.getImageContentType(id)
-                            .map(contentType -> ResponseEntity.ok()
-                                    .header(HttpHeaders.CONTENT_TYPE, contentType)
-                                    .body(data));
-                });
+                .flatMap(data -> service.getImageContentType(id)
+                        .map(contentType -> ResponseEntity.ok()
+                                .header(HttpHeaders.CONTENT_TYPE, contentType)
+                                .body(data)))
+                .switchIfEmpty(Mono.just(ResponseEntity.notFound().build()));
     }
 
     // ── Auditoría reactiva (Práctica 4) ──

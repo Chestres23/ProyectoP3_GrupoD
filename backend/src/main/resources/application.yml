@@ -1,8 +1,8 @@
 spring:
   r2dbc:
-    url: r2dbc:mysql://localhost:3306/campus_lost_db?sslMode=DISABLED
-    username: root
-    password: admin
+    url: r2dbc:h2:file:///./data/campus_lost_db;CASE_INSENSITIVE_IDENTIFIERS=TRUE;DB_CLOSE_ON_EXIT=FALSE
+    username: sa
+    password:
     pool:
       enabled: false
 

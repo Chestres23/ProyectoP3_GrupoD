@@ -4,6 +4,7 @@ import ec.edu.espe.backend.domain.User;
 import ec.edu.espe.backend.dto.AuthRequestDTO;
 import ec.edu.espe.backend.dto.AuthResponseDTO;
 import ec.edu.espe.backend.dto.RegisterRequestDTO;
+import ec.edu.espe.backend.exception.DuplicateEmailException;
 import ec.edu.espe.backend.repository.UserRepository;
 import ec.edu.espe.backend.security.JwtService;
 import ec.edu.espe.backend.security.UserPrincipal;
@@ -38,7 +39,7 @@ public class AuthService {
         return userRepository.existsByEmail(request.getEmail())
                 .flatMap(exists -> {
                     if (exists) {
-                        return Mono.error(new RuntimeException("Email ya registrado"));
+                        return Mono.error(new DuplicateEmailException("Email ya registrado"));
                     }
                     User user = new User();
                     user.setName(request.getName());
