@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS lost_items (
     location_found  VARCHAR(120),
     date_found      DATE,
     image_url       VARCHAR(500),
-    image_data      LONGBLOB,
+    image_data      BLOB,
     image_type      VARCHAR(60),
     status          VARCHAR(20)   NOT NULL DEFAULT 'FOUND',
     active          BOOLEAN       NOT NULL DEFAULT TRUE,
