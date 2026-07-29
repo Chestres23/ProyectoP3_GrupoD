@@ -146,6 +146,7 @@ export default function EditItem() {
                   src={getImageUrl(id)}
                   alt="Imagen actual"
                   className="h-40 w-full rounded-2xl object-cover border border-slate-200"
+                  onError={(e) => { e.target.style.display = 'none' }}
                 />
               </div>
             )}
