@@ -60,11 +60,12 @@ class ReactiveClaimServiceTest {
         StepVerifier.withVirtualTime(service::simulateClaimActivity)
                 .thenAwait(Duration.ofSeconds(3))
                 .assertNext(event -> {
-                    assertThat(event.getType()).isEqualTo(ClaimEventType.CREATED);
-                    assertThat(event.getClaimId()).isEqualTo(1000L);
+                    ClaimEventType type = event.getType();
+                    assertThat(type).isIn((Object[]) ClaimEventType.values());
+                    assertThat(event.getEntityId()).isEqualTo(1000L);
                     assertThat(event.getItemName()).isNotBlank();
                     assertThat(event.getUserName()).isNotBlank();
-                    assertThat(event.getStatus()).isEqualTo("PENDING");
+                    assertThat(event.getDescription()).contains("Simulación");
                     assertThat(event.getTimestamp()).isNotNull();
                 })
                 .thenCancel()

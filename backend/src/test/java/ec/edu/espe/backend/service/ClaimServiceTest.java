@@ -21,7 +21,6 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.beans.factory.ObjectProvider;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
@@ -48,14 +47,11 @@ class ClaimServiceTest {
     @Mock private ClaimRepository claimRepository;
     @Mock private UserRepository userRepository;
     @Mock private LostItemRepository lostItemRepository;
-    @Mock private ObjectProvider<ec.edu.espe.backend.reactive.service.ReactiveClaimService> reactiveProvider;
-
     private ClaimService service;
 
     @BeforeEach
     void setUp() {
-        when(reactiveProvider.getIfAvailable()).thenReturn(null);
-        service = new ClaimServiceImpl(claimRepository, userRepository, lostItemRepository, reactiveProvider);
+        service = new ClaimServiceImpl(claimRepository, userRepository, lostItemRepository);
     }
 
     private User mockUser() {

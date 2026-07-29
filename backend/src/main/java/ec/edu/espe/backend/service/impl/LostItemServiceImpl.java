@@ -6,10 +6,12 @@ import ec.edu.espe.backend.dto.LostItemResponseDTO;
 import ec.edu.espe.backend.exception.InvalidItemStateException;
 import ec.edu.espe.backend.exception.ItemNotFoundException;
 import ec.edu.espe.backend.exception.UnauthorizedOperationException;
+import ec.edu.espe.backend.reactive.service.ReactiveClaimService;
 import ec.edu.espe.backend.repository.LostItemRepository;
 import ec.edu.espe.backend.repository.UserRepository;
 import ec.edu.espe.backend.security.UserPrincipal;
 import ec.edu.espe.backend.service.LostItemService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.security.core.context.ReactiveSecurityContextHolder;
@@ -19,16 +21,14 @@ import reactor.core.publisher.Mono;
 
 import java.time.LocalDateTime;
 
-/**
- * Implementación reactiva del servicio de objetos perdidos.
- * Usa ReactiveSecurityContextHolder para obtener el usuario autenticado
- * (reemplaza SecurityContextHolder que es bloqueante/thread-local).
- */
 @Service
 public class LostItemServiceImpl implements LostItemService {
 
     private final LostItemRepository itemRepository;
     private final UserRepository userRepository;
+
+    @Autowired(required = false)
+    private ReactiveClaimService reactiveClaimService;
 
     public LostItemServiceImpl(LostItemRepository itemRepository, UserRepository userRepository) {
         this.itemRepository = itemRepository;
@@ -52,15 +52,16 @@ public class LostItemServiceImpl implements LostItemService {
                     item.setCreatedAt(now);
                     item.setUpdatedAt(now);
                     return itemRepository.save(item)
-                            .map(saved -> mapToDTO(saved, user.getName(), user.getId()));
+                            .map(saved -> {
+                                emitEvent("ITEM_CREATED", saved.getId(), saved.getName(), user.getName(),
+                                        "Nuevo objeto: " + saved.getName() + " (" + saved.getCategory() + ")");
+                                return mapToDTO(saved, user.getName(), user.getId());
+                            });
                 });
     }
 
     @Override
     public Flux<LostItemResponseDTO> getAllActiveItems() {
-        // Para cada item, resolvemos el nombre del usuario de forma reactiva.
-        // Usamos concatMap para no disparar demasiadas consultas concurrentes que puedan romper
-        // el streaming de la respuesta en conexiones con muchos resultados.
         return itemRepository.findByActiveTrue()
                 .concatMap(item -> userRepository.findById(item.getUserId())
                         .map(user -> mapToDTO(item, user.getName(), user.getId()))
@@ -86,7 +87,9 @@ public class LostItemServiceImpl implements LostItemService {
                     item.setUpdatedAt(LocalDateTime.now());
                     return itemRepository.save(item);
                 })
-                .flatMap(this::enrichDTO);
+                .flatMap(this::enrichDTO)
+                .doOnNext(dto -> emitEvent("ITEM_CLAIMED", dto.getId(), dto.getName(), dto.getReporterName(),
+                        "Objeto reclamado: " + dto.getName()));
     }
 
     @Override
@@ -101,7 +104,9 @@ public class LostItemServiceImpl implements LostItemService {
                     item.setUpdatedAt(LocalDateTime.now());
                     return itemRepository.save(item);
                 })
-                .flatMap(this::enrichDTO);
+                .flatMap(this::enrichDTO)
+                .doOnNext(dto -> emitEvent("ITEM_DELIVERED", dto.getId(), dto.getName(), dto.getReporterName(),
+                        "Objeto entregado: " + dto.getName()));
     }
 
     @Override
@@ -135,7 +140,9 @@ public class LostItemServiceImpl implements LostItemService {
                             item.setUpdatedAt(LocalDateTime.now());
                             return itemRepository.save(item);
                         }))
-                .flatMap(this::enrichDTO);
+                .flatMap(this::enrichDTO)
+                .doOnNext(dto -> emitEvent("ITEM_UPDATED", dto.getId(), dto.getName(), dto.getReporterName(),
+                        "Objeto actualizado: " + dto.getName()));
     }
 
     @Override
@@ -149,10 +156,6 @@ public class LostItemServiceImpl implements LostItemService {
                 .then();
     }
 
-    /**
-     * Sube una imagen usando FilePart (WebFlux) en vez de MultipartFile (Servlet).
-     * Lee los bytes de forma reactiva con DataBufferUtils.
-     */
     @Override
     public Mono<Void> uploadImage(Long id, FilePart filePart) {
         return getActiveItem(id)
@@ -169,7 +172,9 @@ public class LostItemServiceImpl implements LostItemService {
                                 item.setUpdatedAt(LocalDateTime.now());
                                 return itemRepository.save(item).then();
                             })
-                );
+                )
+                .doOnSuccess(unused -> emitEvent("IMAGE_UPLOADED", id, null, null,
+                        "Imagen subida al objeto #" + id));
     }
 
     @Override
@@ -190,17 +195,11 @@ public class LostItemServiceImpl implements LostItemService {
                 .defaultIfEmpty("image/jpeg");
     }
 
-    // ── Helpers ──
-
     private Mono<LostItem> getActiveItem(Long id) {
         return itemRepository.findByIdAndActiveTrue(id)
                 .switchIfEmpty(Mono.error(new ItemNotFoundException("Objeto no encontrado o inactivo.")));
     }
 
-    /**
-     * Obtiene el usuario autenticado desde ReactiveSecurityContextHolder
-     * (reemplaza SecurityContextHolder que es thread-local/bloqueante).
-     */
     private Mono<ec.edu.espe.backend.domain.User> getAuthenticatedUser() {
         return ReactiveSecurityContextHolder.getContext()
                 .map(ctx -> (UserPrincipal) ctx.getAuthentication().getPrincipal())
@@ -227,5 +226,11 @@ public class LostItemServiceImpl implements LostItemService {
         dto.setReporterName(reporterName);
         dto.setReporterId(reporterId);
         return dto;
+    }
+
+    private void emitEvent(String type, Long entityId, String itemName, String userName, String description) {
+        if (reactiveClaimService != null) {
+            reactiveClaimService.emitEvent(type, entityId, itemName, userName, null, description);
+        }
     }
 }

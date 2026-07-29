@@ -29,18 +29,17 @@ export default function ReactiveMonitor() {
 
   useEffect(() => {
     fetchStats()
-    const interval = setInterval(fetchStats, 5000) // cada 5 seg
+    const interval = setInterval(fetchStats, 5000)
     return () => clearInterval(interval)
   }, [])
 
   const pushEvent = (data) => {
-    setEvents(prev => [data, ...prev].slice(0, 15))
+    setEvents(prev => [data, ...prev].slice(0, 50))
     fetchStats()
   }
 
   const handleEvent = (e) => {
     if (!e?.data) return
-
     try {
       const data = JSON.parse(e.data)
       pushEvent(data)
@@ -50,10 +49,6 @@ export default function ReactiveMonitor() {
   }
 
   useEffect(() => {
-    // SSE no permite enviar Headers de Autorización fácilmente con el EventSource nativo.
-    // Usualmente se envía el token por URL (?token=) o se exime de seguridad la ruta SSE para lectura.
-    // Aquí el backend tiene .pathMatchers("/reactive/**").permitAll() configurado.
-
     const eventSource = new EventSource(`${API_BASE}/reactive/claims/stream`)
 
     eventSource.addEventListener('open', () => {
@@ -65,7 +60,6 @@ export default function ReactiveMonitor() {
 
     eventSource.onerror = (e) => {
       console.error('SSE error', e)
-      // No cerrar manualmente aquí para permitir que EventSource rehaga la conexión.
     }
 
     return () => eventSource.close()
@@ -91,15 +85,39 @@ export default function ReactiveMonitor() {
     }
   }
 
-  const getStatusBadge = (status) => {
-    const map = {
-      CREATED: 'bg-blue-500',
-      APPROVED: 'bg-green-500',
-      REJECTED: 'bg-red-500',
-      DELETED: 'bg-gray-500',
-      PENDING: 'bg-yellow-500'
+  const getTypeBadge = (type) => {
+    const colors = {
+      ITEM_CREATED: 'bg-emerald-600',
+      ITEM_UPDATED: 'bg-amber-500',
+      ITEM_DELETED: 'bg-red-600',
+      ITEM_CLAIMED: 'bg-blue-600',
+      ITEM_DELIVERED: 'bg-green-600',
+      IMAGE_UPLOADED: 'bg-purple-500',
+      CLAIM_CREATED: 'bg-cyan-600',
+      CLAIM_APPROVED: 'bg-green-500',
+      CLAIM_REJECTED: 'bg-red-500',
+      CLAIM_DELETED: 'bg-gray-500',
+      USER_REGISTERED: 'bg-indigo-500',
+      USER_DEACTIVATED: 'bg-orange-500'
     }
-    return map[status] || 'bg-slate-500'
+    const label = {
+      ITEM_CREATED: 'OBJETO CREADO',
+      ITEM_UPDATED: 'OBJETO ACTUALIZADO',
+      ITEM_DELETED: 'OBJETO ELIMINADO',
+      ITEM_CLAIMED: 'OBJETO RECLAMADO',
+      ITEM_DELIVERED: 'OBJETO ENTREGADO',
+      IMAGE_UPLOADED: 'IMAGEN SUBIDA',
+      CLAIM_CREATED: 'RECLAMO CREADO',
+      CLAIM_APPROVED: 'RECLAMO APROBADO',
+      CLAIM_REJECTED: 'RECLAMO RECHAZADO',
+      CLAIM_DELETED: 'RECLAMO ELIMINADO',
+      USER_REGISTERED: 'USUARIO REGISTRADO',
+      USER_DEACTIVATED: 'USUARIO DESACTIVADO'
+    }
+    return {
+      color: colors[type] || 'bg-slate-500',
+      label: label[type] || type
+    }
   }
 
   return (
@@ -108,7 +126,7 @@ export default function ReactiveMonitor() {
         <div>
           <h1 className="text-4xl font-black tracking-tight text-slate-900">Monitor Reactivo (WebFlux)</h1>
           <p className="mt-2 text-lg text-slate-600">
-            Estadísticas asíncronas y eventos SSE en tiempo real.
+            Todas las acciones del sistema en tiempo real vía SSE.
           </p>
         </div>
         <button
@@ -120,7 +138,6 @@ export default function ReactiveMonitor() {
         </button>
       </header>
 
-      {/* Estadísticas Asíncronas */}
       <section className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
         <StatCard title="Total Objetos" value={stats?.totalItems || 0} />
         <StatCard title="Reclamos Activos" value={stats?.totalClaims || 0} />
@@ -134,28 +151,28 @@ export default function ReactiveMonitor() {
         />
       </section>
 
-      {/* Stream SSE */}
       <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-200/40">
-        <h2 className="mb-4 text-2xl font-bold">Stream de Eventos (SSE)</h2>
-        <div className="space-y-3">
+        <h2 className="mb-4 text-2xl font-bold">Log de actividades en tiempo real</h2>
+        <div className="space-y-2">
           {events.length === 0 ? (
             <p className="text-slate-500">Esperando eventos en vivo...</p>
           ) : (
-            events.map((ev, idx) => (
-              <div key={idx} className="flex items-center justify-between rounded-xl border border-slate-100 bg-slate-50 p-4 transition-all duration-300">
-                <div className="flex flex-col">
-                  <span className="font-semibold text-slate-900">
-                    {ev.itemName} - Reclamado por {ev.userName}
+            events.map((ev, idx) => {
+              const badge = getTypeBadge(ev.type)
+              return (
+                <div key={idx} className="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 transition-all duration-300">
+                  <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-bold text-white ${badge.color}`}>
+                    {badge.label}
                   </span>
-                  <span className="text-xs text-slate-500">
-                    ID: {ev.claimId} | {new Date(ev.timestamp).toLocaleTimeString()}
+                  <p className="flex-1 text-sm text-slate-800">
+                    {ev.description || `${ev.itemName} - ${ev.userName}`}
+                  </p>
+                  <span className="shrink-0 text-[11px] text-slate-400">
+                    {ev.timestamp ? new Date(ev.timestamp).toLocaleTimeString() : ''}
                   </span>
                 </div>
-                <div className={`rounded-full px-3 py-1 text-xs font-bold text-white shadow-sm ${getStatusBadge(ev.type)}`}>
-                  {ev.type}
-                </div>
-              </div>
-            ))
+              )
+            })
           )}
         </div>
       </section>

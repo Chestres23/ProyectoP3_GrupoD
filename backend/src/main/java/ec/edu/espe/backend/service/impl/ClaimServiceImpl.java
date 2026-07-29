@@ -3,27 +3,19 @@ package ec.edu.espe.backend.service.impl;
 import ec.edu.espe.backend.domain.Claim;
 import ec.edu.espe.backend.dto.ClaimRequestDTO;
 import ec.edu.espe.backend.dto.ClaimResponseDTO;
-import ec.edu.espe.backend.exception.ClaimNotFoundException;
-import ec.edu.espe.backend.exception.DuplicateClaimException;
-import ec.edu.espe.backend.exception.InvalidClaimStateException;
-import ec.edu.espe.backend.exception.ItemNotFoundException;
-import ec.edu.espe.backend.exception.UserNotFoundException;
+import ec.edu.espe.backend.exception.*;
+import ec.edu.espe.backend.reactive.service.ReactiveClaimService;
 import ec.edu.espe.backend.repository.ClaimRepository;
 import ec.edu.espe.backend.repository.LostItemRepository;
 import ec.edu.espe.backend.repository.UserRepository;
 import ec.edu.espe.backend.service.ClaimService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.time.LocalDateTime;
 
-/**
- * Implementación reactiva del servicio de reclamos.
- * Cada operación es una cadena no bloqueante de Mono/Flux.
- * Las relaciones (User, LostItem) se resuelven con flatMap manual
- * ya que R2DBC no tiene lazy loading ni joins automáticos.
- */
 @Service
 public class ClaimServiceImpl implements ClaimService {
 
@@ -31,17 +23,15 @@ public class ClaimServiceImpl implements ClaimService {
     private final UserRepository userRepository;
     private final LostItemRepository lostItemRepository;
 
-    // Inyección opcional del servicio reactivo SSE (puede ser null en tests básicos)
-    private final ec.edu.espe.backend.reactive.service.ReactiveClaimService reactiveClaimService;
+    @Autowired(required = false)
+    private ReactiveClaimService reactiveClaimService;
 
     public ClaimServiceImpl(ClaimRepository claimRepository,
                             UserRepository userRepository,
-                            LostItemRepository lostItemRepository,
-                            org.springframework.beans.factory.ObjectProvider<ec.edu.espe.backend.reactive.service.ReactiveClaimService> reactiveProvider) {
+                            LostItemRepository lostItemRepository) {
         this.claimRepository = claimRepository;
         this.userRepository = userRepository;
         this.lostItemRepository = lostItemRepository;
-        this.reactiveClaimService = reactiveProvider.getIfAvailable();
     }
 
     @Override
@@ -72,8 +62,8 @@ public class ClaimServiceImpl implements ClaimService {
                                 claim.setUpdatedAt(now);
                                 return claimRepository.save(claim)
                                         .map(saved -> {
-                                            // Emitir evento al hot stream SSE
-                                            emitEvent("CREATED", saved, item.getName(), user.getName());
+                                            emitEvent("CLAIM_CREATED", saved.getId(), item.getName(), user.getName(),
+                                                    "Nuevo reclamo: " + item.getName() + " por " + user.getName());
                                             return buildDTO(saved, user.getId(), user.getName(), user.getEmail(),
                                                     item.getId(), item.getName(), item.getStatus(),
                                                     item.getCategory(), item.getLocationFound());
@@ -108,7 +98,8 @@ public class ClaimServiceImpl implements ClaimService {
                                 return lostItemRepository.save(item)
                                         .then(claimRepository.save(claim))
                                         .flatMap(saved -> enrichClaimDTO(saved)
-                                                .doOnNext(dto -> emitEvent("APPROVED", saved, item.getName(), null)));
+                                                .doOnNext(dto -> emitEvent("CLAIM_APPROVED", saved.getId(), item.getName(), null,
+                                                        "Reclamo aprobado: " + item.getName())));
                             });
                 });
     }
@@ -125,7 +116,8 @@ public class ClaimServiceImpl implements ClaimService {
                     claim.setUpdatedAt(LocalDateTime.now());
                     return claimRepository.save(claim)
                             .flatMap(saved -> enrichClaimDTO(saved)
-                                    .doOnNext(dto -> emitEvent("REJECTED", saved, dto.getItemName(), null)));
+                                    .doOnNext(dto -> emitEvent("CLAIM_REJECTED", saved.getId(), dto.getItemName(), null,
+                                            "Reclamo rechazado: " + dto.getItemName())));
                 });
     }
 
@@ -137,15 +129,12 @@ public class ClaimServiceImpl implements ClaimService {
                     claim.setActive(false);
                     claim.setUpdatedAt(LocalDateTime.now());
                     return claimRepository.save(claim)
-                            .doOnNext(saved -> emitEvent("DELETED", saved, null, null));
+                            .doOnNext(saved -> emitEvent("CLAIM_DELETED", saved.getId(), null, null,
+                                    "Reclamo eliminado #" + saved.getId()));
                 })
                 .then();
     }
 
-    /**
-     * Enriquece un Claim con datos de User y LostItem para armar el DTO completo.
-     * En R2DBC no hay lazy loading, se hace manualmente.
-     */
     private Mono<ClaimResponseDTO> enrichClaimDTO(Claim claim) {
         Mono<ec.edu.espe.backend.domain.User> userMono = userRepository.findById(claim.getUserId())
                 .defaultIfEmpty(new ec.edu.espe.backend.domain.User());
@@ -177,12 +166,9 @@ public class ClaimServiceImpl implements ClaimService {
         return dto;
     }
 
-    /**
-     * Emite un evento al hot stream SSE si el servicio reactivo está disponible.
-     */
-    private void emitEvent(String type, Claim claim, String itemName, String userName) {
+    private void emitEvent(String type, Long entityId, String itemName, String userName, String description) {
         if (reactiveClaimService != null) {
-            reactiveClaimService.emitEvent(type, claim.getId(), itemName, userName, claim.getStatus());
+            reactiveClaimService.emitEvent(type, entityId, itemName, userName, null, description);
         }
     }
 }
