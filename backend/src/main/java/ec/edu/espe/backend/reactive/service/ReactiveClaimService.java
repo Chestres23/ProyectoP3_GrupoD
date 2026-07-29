@@ -26,7 +26,7 @@ public class ReactiveClaimService {
     private final LostItemRepository lostItemRepository;
 
     private final Sinks.Many<ReactiveClaimEvent> eventSink =
-            Sinks.many().multicast().onBackpressureBuffer();
+            Sinks.many().replay().all();
     private final AtomicLong eventCounter = new AtomicLong(0);
 
     public ReactiveClaimService(ClaimRepository claimRepository,
