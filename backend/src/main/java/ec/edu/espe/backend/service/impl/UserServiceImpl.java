@@ -1,20 +1,21 @@
 package ec.edu.espe.backend.service.impl;
 
 import ec.edu.espe.backend.domain.User;
+import ec.edu.espe.backend.reactive.service.ReactiveClaimService;
 import ec.edu.espe.backend.repository.UserRepository;
 import ec.edu.espe.backend.service.UserService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-/**
- * Implementación reactiva del servicio de usuarios.
- * Todas las operaciones son no bloqueantes con cadenas Mono/Flux.
- */
 @Service
 public class UserServiceImpl implements UserService {
 
     private final UserRepository userRepository;
+
+    @Autowired(required = false)
+    private ReactiveClaimService reactiveClaimService;
 
     public UserServiceImpl(UserRepository userRepository) {
         this.userRepository = userRepository;
@@ -22,7 +23,6 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public Mono<User> save(User user) {
-        // Verificar email único de forma reactiva
         return userRepository.existsByEmail(user.getEmail())
                 .flatMap(exists -> {
                     if (exists) {
@@ -55,6 +55,18 @@ public class UserServiceImpl implements UserService {
                     user.setActive(false);
                     return userRepository.save(user);
                 })
+                .doOnSuccess(saved -> {
+                    if (saved != null) {
+                        emitEvent("USER_DEACTIVATED", saved.getId(), saved.getName(), saved.getEmail(),
+                                "Usuario desactivado: " + saved.getName() + " (" + saved.getEmail() + ")");
+                    }
+                })
                 .then();
+    }
+
+    private void emitEvent(String type, Long entityId, String itemName, String userName, String description) {
+        if (reactiveClaimService != null) {
+            reactiveClaimService.emitEvent(type, entityId, itemName, userName, null, description);
+        }
     }
 }

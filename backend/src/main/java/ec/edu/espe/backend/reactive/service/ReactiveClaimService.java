@@ -5,6 +5,8 @@ import ec.edu.espe.backend.reactive.model.ReactiveClaimEvent;
 import ec.edu.espe.backend.reactive.model.ReactiveStatsDTO;
 import ec.edu.espe.backend.repository.ClaimRepository;
 import ec.edu.espe.backend.repository.LostItemRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -15,29 +17,17 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * Servicio reactivo para la extensión de la Práctica 3 (WebFlux).
- *
- * Conceptos demostrados:
- * - Sinks.Many: hot stream (publicador caliente) para emitir eventos SSE en tiempo real.
- * - Mono: cálculo asíncrono no bloqueante de estadísticas.
- * - Flux.interval: generación automática periódica de eventos simulados.
- * - SSE (Server-Sent Events): stream en vivo consumible desde el frontend.
- */
 @Service
 public class ReactiveClaimService {
+
+    private static final Logger log = LoggerFactory.getLogger(ReactiveClaimService.class);
 
     private final ClaimRepository claimRepository;
     private final LostItemRepository lostItemRepository;
 
-    /**
-     * Sinks.Many actúa como "publicador caliente" (hot publisher).
-     * Los eventos emitidos aquí son enviados a todos los suscriptores SSE en tiempo real.
-     * multicast() permite múltiples suscriptores simultáneos.
-     * onBackpressureBuffer() maneja la contrapresión almacenando eventos temporalmente.
-     */
     private final Sinks.Many<ReactiveClaimEvent> eventSink =
             Sinks.many().multicast().onBackpressureBuffer();
+    private final AtomicLong eventCounter = new AtomicLong(0);
 
     public ReactiveClaimService(ClaimRepository claimRepository,
                                  LostItemRepository lostItemRepository) {
@@ -45,36 +35,47 @@ public class ReactiveClaimService {
         this.lostItemRepository = lostItemRepository;
     }
 
-    /**
-     * Emite un evento al hot stream. Invocado desde ClaimServiceImpl
-     * cuando se crea, aprueba, rechaza o elimina un reclamo.
-     */
-    public void emitEvent(String type, Long claimId, String itemName, String userName, String status) {
+    public void emitEvent(String type, Long entityId, String itemName, String userName, String status) {
+        emitEvent(type, entityId, itemName, userName, status, null);
+    }
+
+    public void emitEvent(String type, Long entityId, String itemName, String userName, String status, String description) {
+        long n = eventCounter.incrementAndGet();
+        log.info("emitEvent #{}: type={}, item={}, user={}, desc={}, subscribers={}",
+                n, type, itemName, userName, description, eventSink.currentSubscriberCount());
         ReactiveClaimEvent event = new ReactiveClaimEvent(
                 UUID.randomUUID().toString(),
                 ClaimEventType.valueOf(type),
-                claimId,
-                itemName != null ? itemName : "N/A",
-                userName != null ? userName : "N/A",
-                status
+                entityId,
+                itemName,
+                userName,
+                status,
+                description
         );
-        eventSink.tryEmitNext(event);
+        Sinks.EmitResult result = eventSink.tryEmitNext(event);
+        log.info("emitEvent #{}: tryEmitNext result={}", n, result);
+        if (result != Sinks.EmitResult.OK) {
+            eventSink.emitNext(event, (signalType, emitResult) -> {
+                log.warn("emitEvent #{}: retrying after {} (signalType={})", n, emitResult, signalType);
+                return emitResult == Sinks.EmitResult.FAIL_NON_SERIALIZED;
+            });
+        }
     }
 
-    /**
-     * Retorna el Flux del hot stream para consumo SSE.
-     * Cada suscriptor (cliente SSE) recibe los eventos en tiempo real.
-     */
+    public int subscriberCount() {
+        return eventSink.currentSubscriberCount();
+    }
+
     public Flux<ReactiveClaimEvent> getEventStream() {
-        return eventSink.asFlux();
+        return eventSink.asFlux()
+                .doOnSubscribe(s -> log.info("SSE subscriber connected. Total subscribers: {}",
+                        eventSink.currentSubscriberCount()))
+                .doOnCancel(() -> log.info("SSE subscriber cancelled. Remaining: {}",
+                        eventSink.currentSubscriberCount()))
+                .doOnTerminate(() -> log.info("SSE subscriber terminated. Remaining: {}",
+                        eventSink.currentSubscriberCount()));
     }
 
-    /**
-     * Cálculo asíncrono no bloqueante de estadísticas.
-     * Demuestra el uso de Mono.zip para combinar múltiples queries reactivas
-     * en un solo resultado — equivalente al "promedio asíncrono" del laboratorio
-     * pero aplicado al dominio del proyecto.
-     */
     public Mono<ReactiveStatsDTO> computeStatsAsync() {
         return Mono.zip(
                 lostItemRepository.count(),
@@ -91,7 +92,6 @@ public class ReactiveClaimService {
             stats.setApprovedClaims(tuple.getT4());
             stats.setRejectedClaims(tuple.getT5());
             stats.setDeliveredItems(tuple.getT6());
-            // Tasa de aprobación: aprobados / total de reclamos procesados
             long processed = tuple.getT4() + tuple.getT5();
             stats.setApprovalRate(processed > 0 ? (double) tuple.getT4() / processed * 100 : 0.0);
             stats.setTimestamp(LocalDateTime.now());
@@ -99,11 +99,6 @@ public class ReactiveClaimService {
         });
     }
 
-    /**
-     * Simula actividad de reclamos generando eventos cada 3 segundos.
-     * Demuestra Flux.interval para generación automática periódica — equivalente
-     * a la simulación de sensores del laboratorio, adaptada al dominio del proyecto.
-     */
     public Flux<ReactiveClaimEvent> simulateClaimActivity() {
         AtomicLong counter = new AtomicLong(0);
         String[] items = {"Laptop HP", "Mochila negra", "Celular Samsung", "Llaves", "Calculadora", "Audífonos"};
@@ -122,7 +117,8 @@ public class ReactiveClaimService {
                             1000L + idx,
                             item,
                             user,
-                            type == ClaimEventType.APPROVED ? "APPROVED" : type == ClaimEventType.REJECTED ? "REJECTED" : "PENDING"
+                            type == ClaimEventType.CLAIM_APPROVED ? "APPROVED" : type == ClaimEventType.CLAIM_REJECTED ? "REJECTED" : "PENDING",
+                            "Simulación: " + type.name() + " - " + item
                     );
                 });
     }
