@@ -5,6 +5,8 @@ import ec.edu.espe.backend.reactive.model.ReactiveClaimEvent;
 import ec.edu.espe.backend.reactive.model.ReactiveStatsDTO;
 import ec.edu.espe.backend.repository.ClaimRepository;
 import ec.edu.espe.backend.repository.LostItemRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -18,11 +20,14 @@ import java.util.concurrent.atomic.AtomicLong;
 @Service
 public class ReactiveClaimService {
 
+    private static final Logger log = LoggerFactory.getLogger(ReactiveClaimService.class);
+
     private final ClaimRepository claimRepository;
     private final LostItemRepository lostItemRepository;
 
     private final Sinks.Many<ReactiveClaimEvent> eventSink =
             Sinks.many().multicast().onBackpressureBuffer();
+    private final AtomicLong eventCounter = new AtomicLong(0);
 
     public ReactiveClaimService(ClaimRepository claimRepository,
                                  LostItemRepository lostItemRepository) {
@@ -35,6 +40,9 @@ public class ReactiveClaimService {
     }
 
     public void emitEvent(String type, Long entityId, String itemName, String userName, String status, String description) {
+        long n = eventCounter.incrementAndGet();
+        log.info("emitEvent #{}: type={}, item={}, user={}, desc={}, subscribers={}",
+                n, type, itemName, userName, description, eventSink.currentSubscriberCount());
         ReactiveClaimEvent event = new ReactiveClaimEvent(
                 UUID.randomUUID().toString(),
                 ClaimEventType.valueOf(type),
@@ -44,12 +52,28 @@ public class ReactiveClaimService {
                 status,
                 description
         );
-        eventSink.emitNext(event, (signalType, emitResult) ->
-                emitResult == Sinks.EmitResult.FAIL_NON_SERIALIZED);
+        Sinks.EmitResult result = eventSink.tryEmitNext(event);
+        log.info("emitEvent #{}: tryEmitNext result={}", n, result);
+        if (result != Sinks.EmitResult.OK) {
+            eventSink.emitNext(event, (signalType, emitResult) -> {
+                log.warn("emitEvent #{}: retrying after {} (signalType={})", n, emitResult, signalType);
+                return emitResult == Sinks.EmitResult.FAIL_NON_SERIALIZED;
+            });
+        }
+    }
+
+    public int subscriberCount() {
+        return eventSink.currentSubscriberCount();
     }
 
     public Flux<ReactiveClaimEvent> getEventStream() {
-        return eventSink.asFlux();
+        return eventSink.asFlux()
+                .doOnSubscribe(s -> log.info("SSE subscriber connected. Total subscribers: {}",
+                        eventSink.currentSubscriberCount()))
+                .doOnCancel(() -> log.info("SSE subscriber cancelled. Remaining: {}",
+                        eventSink.currentSubscriberCount()))
+                .doOnTerminate(() -> log.info("SSE subscriber terminated. Remaining: {}",
+                        eventSink.currentSubscriberCount()));
     }
 
     public Mono<ReactiveStatsDTO> computeStatsAsync() {
